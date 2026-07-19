@@ -207,7 +207,7 @@ class TestSedtrailsCLI:
     def test_run_error_is_logged_to_fallback_file(
         self, runner, cli_command, mock_run_simulation, clean_sedtrails_logging
     ):
-        """Handled command failures create a traceback-bearing fallback CLI log."""
+        """Handled command failures create a concise fallback CLI log."""
         mock_run_simulation.side_effect = RuntimeError('Fallback logging failure')
 
         with runner.isolated_filesystem():
@@ -219,6 +219,7 @@ class TestSedtrailsCLI:
         assert '=== ERROR: CLI command: run ===' in log_content
         assert 'RuntimeError' in log_content
         assert 'Fallback logging failure' in log_content
+        assert 'Traceback' not in log_content
 
     def test_run_error_uses_active_simulation_log(
         self, runner, cli_command, mock_run_simulation, clean_sedtrails_logging, tmp_path
@@ -237,6 +238,7 @@ class TestSedtrailsCLI:
         assert not fallback_exists
         assert '=== ERROR: CLI command: run ===' in log_content
         assert 'Simulation log failure' in log_content
+        assert 'Traceback' not in log_content
 
     def test_main_logs_typer_usage_errors(self, runner, clean_sedtrails_logging, monkeypatch, capsys):
         """Typer parsing errors retain their exit code and are written to the fallback log."""
@@ -251,6 +253,7 @@ class TestSedtrailsCLI:
         assert '=== ERROR: Typer CLI usage error ===' in log_content
         assert 'NoSuchOption' in log_content
         assert 'No such option: --not-an-option' in log_content
+        assert 'Traceback' not in log_content
 
     def test_config_restart_command_success(self, runner, cli_command):
         """Test successful generation of restart config via CLI."""

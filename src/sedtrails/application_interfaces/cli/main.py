@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from sedtrails.logger.logger import log_exception, setup_logging
+from sedtrails.logger.logger import setup_logging
 
 CLI_LOG_FILENAME = 'sedtrails-cli.log'
 
@@ -25,8 +25,12 @@ def _ensure_cli_logger() -> logging.Logger:
 
 
 def _log_cli_exception(error: Exception, context: str) -> None:
-    """Write a handled CLI exception and traceback to the active log file."""
-    log_exception(_ensure_cli_logger(), error, context=context)
+    """Write a concise handled CLI exception record to the active log file."""
+    logger = _ensure_cli_logger()
+    logger.error('=== ERROR: %s ===', context)
+    logger.error('Exception type: %s', type(error).__name__)
+    logger.error('Exception message: %s', error)
+    logger.error('=' * 50)
 
 
 def _get_typer_click_module():
