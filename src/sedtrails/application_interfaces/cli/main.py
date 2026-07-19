@@ -1,9 +1,76 @@
-"""
-SedTRAILS CLI interface.
-"""
+"""SedTRAILS CLI interface."""
+
+import logging
+import sys
+from pathlib import Path
 
 import typer
-from pathlib import Path
+
+from sedtrails.logger.logger import log_exception, setup_logging
+
+CLI_LOG_FILENAME = 'sedtrails-cli.log'
+
+
+def _ensure_cli_logger() -> logging.Logger:
+    """Return the simulation logger or configure a fallback CLI log file."""
+    logger = logging.getLogger('sedtrails')
+    if any(getattr(handler, 'is_sedtrails_handler', False) for handler in logger.handlers):
+        return logger
+
+    return setup_logging(
+        output_dir=str(Path.cwd()),
+        log_filename=CLI_LOG_FILENAME,
+        console=False,
+    )
+
+
+def _log_cli_exception(error: Exception, context: str) -> None:
+    """Write a handled CLI exception and traceback to the active log file."""
+    log_exception(_ensure_cli_logger(), error, context=context)
+
+
+def _get_typer_click_module():
+    """Return Typer's Click implementation across supported Typer releases."""
+    try:
+        from typer import _click
+
+        return _click
+    except ImportError:
+        import click
+
+        return click
+
+
+def _show_typer_error(error: Exception) -> None:
+    """Render a Typer usage error using Typer's normal rich output when available."""
+    try:
+        from typer.core import HAS_RICH
+
+        if HAS_RICH and app.rich_markup_mode is not None:
+            from typer import rich_utils
+
+            rich_utils.rich_format_error(error)
+            return
+    except (AttributeError, ImportError):
+        pass
+
+    error.show(file=sys.stderr)
+
+
+def _show_typer_abort() -> None:
+    """Render a Typer abort message using Typer's normal output when available."""
+    try:
+        from typer.core import HAS_RICH
+
+        if HAS_RICH and app.rich_markup_mode is not None:
+            from typer import rich_utils
+
+            rich_utils.rich_abort_error()
+            return
+    except (AttributeError, ImportError):
+        pass
+
+    typer.echo('Aborted!', err=True)
 
 
 def version_callback(value: bool):
@@ -30,7 +97,7 @@ app = typer.Typer(
 
 
 @app.callback()
-def main(
+def root_callback(
     version: bool = typer.Option(
         False, '--version', '-v', callback=version_callback, is_eager=True, help='Show version and exit.'
     ),
@@ -84,6 +151,7 @@ def run_simulation_cmd(
         )
         typer.echo(f"Simulation complete. Results saved to '{output_dir}'.")
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: run')
         typer.echo(f'Error running simulation: {e}')
         raise typer.Exit(code=1) from e
 
@@ -122,6 +190,7 @@ def inspect_metadata(
             inspector.inspect_populations()  # print particle population info
 
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: inspect')
         typer.echo(f'Error inspecting metadata: {e}')
         raise typer.Exit(code=1) from e
 
@@ -169,6 +238,7 @@ def load_config(
         typer.echo(str(config))
         return config
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: config load')
         typer.echo(f'Error loading configuration: {e}')
         raise typer.Exit(code=1) from e
 
@@ -197,6 +267,7 @@ def create_config_template_cmd(
         create_config_template(output_file)
         typer.echo(f"Configuration template created at '{output_file}'")
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: config create')
         typer.echo(f'Error creating configuration template: {e}')
         raise typer.Exit(code=1) from e
 
@@ -230,7 +301,7 @@ def seeding_gui_cmd(
         None,
         '--format',
         help=(
-            "Override general.input_model.format. Supported GUI formats: "
+            'Override general.input_model.format. Supported GUI formats: '
             "'fm_netcdf', 'd3d4_netcdf', 'xbeach', and 'sfincs'."
         ),
     ),
@@ -270,10 +341,13 @@ def seeding_gui_cmd(
             variable=variable,
         )
     except SeedingGuiError as e:
+        _log_cli_exception(e, 'CLI command: config gui')
         typer.echo(f'Error opening seeding GUI: {e}')
         raise typer.Exit(code=1) from e
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: config gui')
         typer.echo(f'Unexpected error opening seeding GUI: {e}')
+        raise typer.Exit(code=1) from e
 
 
 @config_app.command('restart')
@@ -327,11 +401,12 @@ def create_restart_config_cmd(
         )
         typer.echo(f"Restart config written to '{summary.output_config}'")
         typer.echo(f"Restart time set to '{summary.restart_time}'")
-        typer.echo(f"Retained particles: {summary.retained_particles}")
+        typer.echo(f'Retained particles: {summary.retained_particles}')
         typer.echo('Generated seed point files:')
         for population_name, path in summary.seed_files.items():
             typer.echo(f'  - {population_name}: {path}')
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: config restart')
         typer.echo(f'Error creating restart config: {e}')
         raise typer.Exit(code=1) from e
 
@@ -379,6 +454,7 @@ def analyze(
         typer.echo(f"Analysis complete. Results saved to '{output_file}'.")
         typer.echo('THIS IS HAS NOT BEEN IMPLEMENTED YET.')
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: analyzer analyze')
         typer.echo(f'Error performing analysis: {e}')
         raise typer.Exit(code=1) from e
 
@@ -387,7 +463,7 @@ def analyze(
 # NETWORK subcommands
 ######################################################################################################
 network_app = typer.Typer(
-    help='Commands to perform network analysi on simulation results. NOT IMPLEMENTED.',
+    help='Commands to perform network analysis on simulation results. NOT IMPLEMENTED.',
     context_settings={'help_option_names': ['-h', '--help']},
 )
 app.add_typer(network_app, name='network')
@@ -427,6 +503,7 @@ def analysis(
         typer.echo('THIS IS HAS NOT BEEN IMPLEMENTED YET.')
 
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: network analysis')
         typer.echo(f'Error performing network analysis: {e}')
         raise typer.Exit(code=1) from e
 
@@ -537,9 +614,30 @@ def plot_trajectories_cmd(
         if show is True:
             typer.echo('Plot displayed successfully')
     except Exception as e:
+        _log_cli_exception(e, 'CLI command: viz trajectories')
         typer.echo(f'Error plotting trajectories: {e}')
         raise typer.Exit(code=1) from e
 
 
+def main() -> int:
+    """Run the CLI while routing Typer and command errors to a log file."""
+    click = _get_typer_click_module()
+    try:
+        result = app(standalone_mode=False)
+    except click.exceptions.ClickException as error:
+        _log_cli_exception(error, 'Typer CLI usage error')
+        _show_typer_error(error)
+        return error.exit_code
+    except click.exceptions.Abort:
+        _ensure_cli_logger().warning('Typer CLI aborted by user')
+        _show_typer_abort()
+        return 1
+    except Exception as error:
+        _log_cli_exception(error, 'Unhandled CLI exception')
+        raise
+
+    return result if isinstance(result, int) else 0
+
+
 if __name__ == '__main__':
-    app()
+    raise SystemExit(main())

@@ -9,7 +9,12 @@ import os
 import sys
 
 
-def setup_logging(output_dir: str, level: str = 'INFO') -> logging.Logger:
+def setup_logging(
+    output_dir: str,
+    level: str = 'INFO',
+    log_filename: str = 'log.txt',
+    console: bool = True,
+) -> logging.Logger:
     """
     Configure global logging.
     - Attaches handlers to the top-level 'sedtrails' logger
@@ -22,6 +27,10 @@ def setup_logging(output_dir: str, level: str = 'INFO') -> logging.Logger:
         Directory where output files are written.
     level : str
         The level value.
+    log_filename : str
+        Name of the log file created inside ``output_dir``.
+    console : bool
+        Whether to also send log records to standard output.
 
     Returns
     -------
@@ -29,7 +38,7 @@ def setup_logging(output_dir: str, level: str = 'INFO') -> logging.Logger:
         Computed value returned by the function.
     """
     os.makedirs(output_dir, exist_ok=True)
-    logfile = os.path.join(output_dir, 'log.txt')
+    logfile = os.path.join(output_dir, log_filename)
 
     logger = logging.getLogger('sedtrails')
 
@@ -58,11 +67,12 @@ def setup_logging(output_dir: str, level: str = 'INFO') -> logging.Logger:
     file_handler.is_sedtrails_handler = True  # marker to prevent duplicates
     logger.addHandler(file_handler)
 
-    console_handler = logging.StreamHandler(stream=sys.stdout)
-    console_handler.setLevel(numeric_level)
-    console_handler.setFormatter(formatter)
-    console_handler.is_sedtrails_handler = True  # marker to prevent duplicates
-    logger.addHandler(console_handler)
+    if console:
+        console_handler = logging.StreamHandler(stream=sys.stdout)
+        console_handler.setLevel(numeric_level)
+        console_handler.setFormatter(formatter)
+        console_handler.is_sedtrails_handler = True  # marker to prevent duplicates
+        logger.addHandler(console_handler)
 
     # Prevent propagation to root logger
     logger.propagate = False

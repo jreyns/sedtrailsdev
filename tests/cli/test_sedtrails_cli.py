@@ -2,13 +2,18 @@
 Unit tests for the SedTRAILS CLI commands.
 """
 
+import logging
+import sys
+from pathlib import Path
+
 import pytest
 import yaml
 from click.testing import CliRunner
 from typer.main import get_command
 from types import SimpleNamespace
 from unittest.mock import patch
-from sedtrails.application_interfaces.cli import app
+from sedtrails.application_interfaces.cli import app, main
+from sedtrails.logger.logger import setup_logging
 
 
 class TestSedtrailsCLI:
@@ -25,6 +30,28 @@ class TestSedtrailsCLI:
     def cli_command(self):
         """Create a Click command from the Typer app."""
         return get_command(app)
+
+    @pytest.fixture
+    def clean_sedtrails_logging(self):
+        """Isolate global SedTRAILS logging state for CLI error tests."""
+        logger = logging.getLogger('sedtrails')
+        original_handlers = logger.handlers[:]
+        original_level = logger.level
+        original_propagate = logger.propagate
+        original_excepthook = sys.excepthook
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+
+        yield
+
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
+        for handler in original_handlers:
+            logger.addHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+        sys.excepthook = original_excepthook
 
     @pytest.fixture
     def sample_config_data(self):
@@ -176,6 +203,54 @@ class TestSedtrailsCLI:
         assert result.exit_code == 1
         assert 'Error running simulation: Simulation failed' in result.stdout
         mock_run_simulation.assert_called_once()
+
+    def test_run_error_is_logged_to_fallback_file(
+        self, runner, cli_command, mock_run_simulation, clean_sedtrails_logging
+    ):
+        """Handled command failures create a traceback-bearing fallback CLI log."""
+        mock_run_simulation.side_effect = RuntimeError('Fallback logging failure')
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli_command, ['run'])
+            log_content = Path('sedtrails-cli.log').read_text(encoding='utf-8')
+
+        assert result.exit_code == 1
+        assert 'Error running simulation: Fallback logging failure' in result.stdout
+        assert '=== ERROR: CLI command: run ===' in log_content
+        assert 'RuntimeError' in log_content
+        assert 'Fallback logging failure' in log_content
+
+    def test_run_error_uses_active_simulation_log(
+        self, runner, cli_command, mock_run_simulation, clean_sedtrails_logging, tmp_path
+    ):
+        """Handled run failures use the configured simulation log when it exists."""
+        output_dir = tmp_path / 'results'
+        setup_logging(str(output_dir), console=False)
+        mock_run_simulation.side_effect = RuntimeError('Simulation log failure')
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli_command, ['run'])
+            fallback_exists = Path('sedtrails-cli.log').exists()
+
+        log_content = (output_dir / 'log.txt').read_text(encoding='utf-8')
+        assert result.exit_code == 1
+        assert not fallback_exists
+        assert '=== ERROR: CLI command: run ===' in log_content
+        assert 'Simulation log failure' in log_content
+
+    def test_main_logs_typer_usage_errors(self, runner, clean_sedtrails_logging, monkeypatch, capsys):
+        """Typer parsing errors retain their exit code and are written to the fallback log."""
+        with runner.isolated_filesystem():
+            monkeypatch.setattr(sys, 'argv', ['sedtrails', 'run', '--not-an-option'])
+            exit_code = main()
+            captured = capsys.readouterr()
+            log_content = Path('sedtrails-cli.log').read_text(encoding='utf-8')
+
+        assert exit_code == 2
+        assert 'No such option: --not-an-option' in captured.err
+        assert '=== ERROR: Typer CLI usage error ===' in log_content
+        assert 'NoSuchOption' in log_content
+        assert 'No such option: --not-an-option' in log_content
 
     def test_config_restart_command_success(self, runner, cli_command):
         """Test successful generation of restart config via CLI."""
